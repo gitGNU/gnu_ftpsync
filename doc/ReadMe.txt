@@ -6,7 +6,7 @@ Contents:
 
 - Overview
 - Why use ftpsync instead of mirror, sitecopy, ...?
-- Why NOT use ftpsync, but rather ... (security disclaimer)
+- Why NOT use ftpsync, but rather ... (Security Disclaimer)
 - Requirements/restrictions
 - Bug reports, contact
 - License
@@ -39,7 +39,7 @@ Compared to sitecopy, if the remote site was changed by other tools and/or activ
 Compared to both tools, ftpsync.pl is very lightweight. ;-))
 
 
-Why NOT use ftpsync, but rather ... (security disclaimer)
+Why NOT use ftpsync, but rather ... (Security Disclaimer)
 ---------------------------------------------------------
 
 FTP is an almost ancient file transport protocol. It has two major flaws:
@@ -77,16 +77,38 @@ Requirements / Restrictions:
   It is being tested only against UNIX based FTP servers.
 
 
+ftpsync-ssl and it's additional requirements:
+---------------------------------------------
+
+ftpsync-ssl is an experimental ftpsync variant with support for (FTP with SSL).
+
+For now it lives besides the ftpsync binary because it uses Net::FTPSSL which 
+- seems to have stopped maturing in 2005, 
+- can be difficult to install,
+- produces weird warning messages when used by an application,
+- has an API that is slightly but inconveniently different from Net::FTP's.
+
+The additional requirements for ftpsync-ssl are:
+- Net::Cmd, usually part of the basic perl package.
+- Net::SSLeay::Handle, part of the libnet-ssleay-perl package.
+- IO::Socket::SSL, part of the libio-socket-ssl-perl package.
+- Net::FTPSSL from CPAN, try calling cpan Net::FTPSSL
+
+
 Homepage:
 ---------------------
 
-http://www.clazzes.org/ftpsync
+Old Homepage:
+  http://www.clazzes.org/ftpsync
+
+New Homepage (not really complete yet):
+  https://savannah.gnu.org/projects/ftpsync/
 
 
 License:
 --------
 
-FTPSync.pl is GNU/GPL software and eMail ware.
+FTPSync.pl is GNU/GPL software.
 
 
 FTPSync.pl as GNU/GPL software:
@@ -112,11 +134,11 @@ See attached file License.txt.
 Download and Updates
 --------------------
 
-Currently, FTPSync is available from:
+FTPSync 1.3.06 is available from:
   https://download.clazzes.org/ftpsync
   https://deb.clazzes.org/
 
-We are however in the process of moving it to GNU.org:
+Current sourcecode is, and new packages will be available from:
   https://savannah.gnu.org/projects/ftpsync/
 
 
