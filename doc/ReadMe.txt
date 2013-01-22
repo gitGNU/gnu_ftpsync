@@ -5,7 +5,8 @@ Contents:
 =========
 
 - Overview
-- Why should I use ftpsync.pl instead of mirror, sitecopy, ...?
+- Why use ftpsync instead of mirror, sitecopy, ...?
+- Why NOT use ftpsync, but rather ... (security disclaimer)
 - Requirements/restrictions
 - Bug reports, contact
 - License
@@ -36,6 +37,23 @@ Compared to mirror, ftpsync.pl is capable of PUTting, not only GETting stuff.
 Compared to sitecopy, if the remote site was changed by other tools and/or activites since the previous run of the synchronization tool, ftpsync.pl doesn't get a hard time. Unless network problems occur or bugs come into action, ftpsync.pl does a synchronizes reliably.
 
 Compared to both tools, ftpsync.pl is very lightweight. ;-))
+
+
+Why NOT use ftpsync, but rather ... (security disclaimer)
+---------------------------------------------------------
+
+FTP is an almost ancient file transport protocol. It has two major flaws:
+
+1. It is difficult to run FTP through NAT routers, because of the use of session specific ports on which the server wants to connect to the client.
+With providers running out of IPv4 addresses and IPv6 growing very slowly, NAT-ing is very common.
+Using passive mode (passive FTP) usually works through NAT routers, but it may fail sometimes.
+
+2. When FTP was born, transport layer security was no issue. Common FTP transfers all data, including passwords (!) in plain text and must therefore be considered VERY INSECURE!
+Therefore users are encouraged to use a secure alternative. 
+Secure alternatives include:
+- rsync over SSH (recommended)
+- SFTP (FTP over SSH)
+- FTPS (FTP with SSL) which is at the top of ftpsync's wish list
 
 
 Requirements / Restrictions:
@@ -91,22 +109,15 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 See attached file License.txt.
 
 
-FTPSync.pl as eMail ware:
--------------------------
+Download and Updates
+--------------------
 
-FTPSync.pl is also eMail ware, which means that the initial author
-(Christoph Lechleitner) would like to get an eMail (to ftpsync@ibcl.at), 
-- if anyone uses the script on production level,
-- if anyone distributes or advertises it in any way,
-- if anyone starts to (try to) improve it.
+Currently, FTPSync is available from:
+  https://download.clazzes.org/ftpsync
+  https://deb.clazzes.org/
 
-
-Updates
--------
-
-The software and updates should be available from 
-https://download.clazzes.org/ftpsync
-http:s//deb.clazzes.org/
+We are however in the process of moving it to GNU.org:
+  https://savannah.gnu.org/projects/ftpsync/
 
 
 Thanks
@@ -115,6 +126,8 @@ Thanks
 Thanks to all who have provided comments and enhancements.
 
 Namely (in order of versions affected):
+
+- Christoph Lechleitner <christoph.lechleitner@iteg.at> (Original Author)
 
 - Michiel Steltman <Msteltman@disway.nl> (provided 1.24)
 
@@ -146,4 +159,5 @@ Namely (in order of versions affected):
 
 - Jonathan Trachtenberg <j.trachtenberg@gmail.com> (proposed agile mode for 1.3.03)
 
+- Ole Tange <tange@gnu.org> (project lead since moving ftpsync 1.3.06 to gnu.org)
 

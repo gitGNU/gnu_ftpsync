@@ -22,12 +22,6 @@
 #    along with this program; if not, write to the Free Software
 #    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
-# FTPSync.pl (ftpsync) is also eMail-Ware, which means that the initial author
-# (Christoph Lechleitner) would like to get an eMail at ftpsync@ibcl.at, if
-# - if anyone uses the script on production level,
-# - if anyone distributes or advertises it in any way,
-# - if anyone starts to (try to) improve it.
-#
 #
 ################################################################################
 

@@ -1,7 +1,7 @@
 Source: ftpsync
 Section: utils
 Priority: optional
-Maintainer: Christoph Lechleitner <lech@ibcl.at>
+Maintainer: Ole Tange <tange@gnu.org>
 Build-Depends: pba-cbs
 XBCS-PBA-Category: ftpsync
 XBCS-PBA-Generation: 1
