@@ -69,6 +69,7 @@ my $followsymlinks=0;
 my $doflat=0;
 my $notimestamping=0;
 my $notimestampcheck=0;
+my $slowmillis=100;
 
 # Read command line options/parameters
 #print "Reading command line options.\n"; # For major problem debugging
@@ -154,6 +155,7 @@ for $curopt (@cfgfoptions, @cloptions) {
     elsif ($fname eq "timeout")   { if ($fvalue>0) { $ftptimeout =$fvalue; } }
     elsif ($fname eq "ignoremask") { $ignoremask = $fvalue; }
     elsif ($fname eq "timeoffset") { $syncoff = $fvalue; }
+    elsif ($fname eq "slowmillis") { $slowmillis = $fvalue; }
   }
   else {
     if ($localdir eq "") {
@@ -573,7 +575,9 @@ sub dosync()
       if (! $dorefresh) { next; }
       if ($dodebug) { print "Really PUTting file ".$curlocalfile."\n"; }
       # Some servers crash if commands are given too fast, so wait a little.
-      select(undef, undef, undef, 100/1000);
+      if ($slowmillis gt 0) {
+        select(undef, undef, undef, $slowmillis/1000);
+      }
       if ($ftpc->put($curlocalfile, $curlocalfile) ne $curlocalfile)
       { print STDERR "Could not put localfile $curlocalfile\n"; }
       my $retries = 3;
@@ -739,7 +743,7 @@ sub parseRemoteURL() {
 
 sub print_syntax() {
   print "\n";
-  print "FTPSync.pl 1.3.06 (2012-03-05)\n";
+  print "ftpsync 1.3.07 (2012-01-28)\n";
   print "\n";
   print " ftpsync [ options ] [ localdir remoteURL ]\n";
   print " ftpsync [ options ] [ remoteURL localdir ]\n";
@@ -767,6 +771,7 @@ sub print_syntax() {
   print "   ftpuser=    defines the FTP user, defaults to \"ftp\".\n";
   print "   ftppasswd=  defines the FTP password, defaults to \"anonymous\".\n";
   print "   ignoremask= defines a regexp to ignore certain files, like .svn"."\n";
+  print "   slowmillis= sleeps speficed # of ms between PUTs, default 100, 0=off"."\n";
   print "   timeoffset= overrules clocksync() detection with given offset in seconds"."\n";
   print "\n";
   print " Later mentioned options and parameters overwrite those mentioned earlier.\n";
@@ -796,11 +801,12 @@ sub print_options() {
   print "ftppasswd     = ", $ftppasswd     , "\n";
   print "ftpserver     = ", $ftpserver     , "\n";
   print "ftpdir        = ", $ftpdir        , "\n";
-  # verbsityosity
+  # verbosity
   print "doverbose     = ", $doverbose     , "\n";
   print "dodebug       = ", $dodebug       , "\n";
   print "doquiet       = ", $doquiet       , "\n";
-  #
+  # other
   print "doinfoonly    = ", $doinfoonly    , "\n";
+  print "slowmillis    = ", $slowmillis    , "\n";
   print "\n";
 }
