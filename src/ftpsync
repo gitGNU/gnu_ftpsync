@@ -1,9 +1,9 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # $Id$
 #
 # See attached README file for any details, or call
-# ftpsync.pl -h
+# ftpsync -h
 # for quick start.
 #
 # LICENSE
@@ -30,6 +30,7 @@
 #
 #print "Starting imports.\n"; # For major problem debugging
 
+use File::Temp qw(tempfile tempdir);
 use File::Find;
 use File::Listing;
 use Net::FTP;
@@ -210,7 +211,7 @@ connection();
 
 if (! $doquiet) { print "\nDetermine s offset.\n"; }
 if (($notimestamping+$notimestampcheck) lt 2 && $syncdirection eq "put" && $syncoff == 0) 
-{ clocksync($ftpc,"syncfile"); }
+{ clocksync($ftpc); }
 
 #  local & remote tree vars
 #chdir $localdir;
@@ -483,40 +484,33 @@ sub buildremotetree() {
 # Synchronize clocks.
 sub clocksync {
     my $conn = shift @_;
-    my $fn = shift @_;
-    my $fndidexist=1;
-
-    if(! -f $fn) {
-      open(SF, ">$fn") or die "Cannot create $fn for time sync option";
-      close(SF);
-      $fndidexist=0;
+    my ($outfh, $name) = ::tempfile(UNLINK => 1);
+    if(not -z $name) {
+	die "File $name for time sync must be empty.";
     }
-    -z $fn or
-      die "File $fn for time sync must be empty.";
-    my $putsyncok=1;
-    $conn->put($fn) or $putsyncok=0;
-    if (!$putsyncok)
-    { unlink($fn);  # cleanup!
-      die "Cannot send timesync file $fn";
+    if(not $conn->put($name)) {
+	die "Cannot send timesync file $name";
     }
-
+    my ($basename) = $name=~m:([a-z_0-9]+)$:i;
+    if (! $doquiet) {
+	printf("Sync file $name => $basename\n");
+    }
     my $now_here1 = time();
-    my $now_there = $conn->mdtm($fn) or
-      die "Cannot get write time of timesync file $fn";
+    my $now_there = $conn->mdtm($basename) or
+      die "Cannot get write time of timesync file $basename";
     my $now_here2 = time();
 
-    if ($now_here2 < $now_there)      # remote is in the future
-    { $syncoff=($now_there - $now_here1);
-      $syncoff -= $syncoff % 60;
-      $syncoff = 0-$syncoff;
+    if ($now_here2 < $now_there) {
+	# remote is in the future
+	$syncoff=($now_there - $now_here1);
+	$syncoff -= $syncoff % 60;
+	$syncoff = 0-$syncoff;
+    } else {
+	# remote is the past # or equal
+	$syncoff=($now_here2 - $now_there);
+	$syncoff -= $syncoff % 60;
     }
-    else
-    #if ($now_here1 > $now_there)      # remote is the past # or equal
-    { $syncoff=($now_here2 - $now_there);
-      $syncoff -= $syncoff % 60;
-    }
-
-    $conn->delete($fn);
+    $conn->delete($basename);
 
     my $hrs = int(abs($syncoff)/3600);
     my $mins = int(abs($syncoff)/60) - $hrs*60;
@@ -524,7 +518,6 @@ sub clocksync {
     if (! $doquiet) {
       printf("Clock sync offset: %d:%02d:%02d\n", $hrs, $mins, $secs);
     }
-    unlink ($fn) unless $fndidexist;
 }
 
 
