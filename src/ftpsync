@@ -123,10 +123,10 @@ for $curopt (@cfgfoptions, @cloptions) {
       elsif ($curoptchar =~ /[tT]/)  { $notimestamping=1; }
       elsif ($curoptchar =~ /[vV]/)  { $doverbose++; $opt::verbose++; }
       elsif ($curoptchar =~ /[nN]/)  { $nodelete=1; }
-      else  { print "ERROR: Unknown option: \"-".$curoptchar."\"\n"; $returncode+=1; }
+      else  { error("Unknown option: \"-".$curoptchar."\"\n"); $returncode+=1; }
     }
   }
-  elsif ($curopt =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)\/(.*)/) {
+  elsif ($curopt =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)(\/.*)?/) {
     $noofopts++;
     $remoteURL = $curopt;
     parseRemoteURL();
@@ -166,7 +166,7 @@ for $curopt (@cfgfoptions, @cloptions) {
       if ( $syncdirection eq "" )
       { $syncdirection="put"; }
     } else {
-      print "ERROR: Unknown parameter: \"".$curopt."\"\n"; $returncode+=1
+      error("Unknown parameter: \"".$curopt."\"\n"); $returncode+=1
     }
   }
 }
@@ -194,17 +194,12 @@ if($ftppasswd eq "?") { print "Password: "; $ftppasswd=<STDIN>; chomp($ftppasswd
 if ($dodebug) { print_options(); }
 # check options
 if ( ($localdir  eq "") || (! -d $localdir) )
-{ print "ERROR: Local directory does not exist: ".$localdir."\n"; $returncode+=1; }
-#if ($localdir  eq "")   { print "ERROR: No localdir given.\n";  $returncode+=1; }
-#if ( ($remoteURL eq "") { print "ERROR: No remoteURL given.\n"; $returncode+=1; }
-if ($ftpserver eq "") { print "ERROR: No FTP server given.\n"; $returncode+=1; }
-if ($ftpdir    eq "") { print "ERROR: No FTP directory given.\n"; $returncode+=1; }
-if ($ftpuser   eq "") { print "ERROR: No FTP user given.\n"; $returncode+=1; }
-if ($ftppasswd eq "") { print "ERROR: No FTP password given.\n"; $returncode+=1; }
+{ error("Local directory does not exist: ".$localdir."\n"); $returncode+=1; }
+if ($ftpserver eq "") { error("No FTP server given.\n"); $returncode+=1; }
+# $ftpdir is allowed to be empty
+if ($ftpuser   eq "") { error("No FTP user given.\n"); $returncode+=1; }
+if ($ftppasswd eq "") { error("No FTP password given.\n"); $returncode+=1; }
 if ($returncode > 0) { die "Aborting due to missing or wrong options! Call ftpsync -? for more information.\n";  }
-
-
-#print "Exiting.\n"; exit 0;
 
 # Find out if ftp server is online & accessible
 my $ftpc;
@@ -711,7 +706,7 @@ sub listremotedirs() {
     }
 }
 sub parseRemoteURL() {
-  if ($remoteURL =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)\/(.*)/) {
+  if ($remoteURL =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)(\/(.*))?/) {
     #print "DEBUG: parsing ".$remoteURL."\n";
     #print "match 1 = ".$1."\n";
     #print "match 2 = ".$2."\n";
@@ -723,7 +718,7 @@ sub parseRemoteURL() {
     if (length($2) > 0) { $ftpuser=$2; }
     if (length($4) > 0) { $ftppasswd=$4; }
     $ftpserver=$5;
-    $ftpdir=$6;
+    $ftpdir=$7;
     if ($ftpdir ne "/") { $ftpdir=~s/\/$//; }
   }
 }
