@@ -37,7 +37,8 @@ clean::
 common-install-indep::
 	mkdir -p debian/tmp
 	mkdir -p $(DESTDIR)/usr/bin
-	cp $(SRCDIR)/ftpsync.pl $(DESTDIR)/usr/bin/
+	cp $(SRCDIR)/ftpsync $(SRCDIR)/ftpsync-ssl $(DESTDIR)/usr/bin/
+	cd $(DESTDIR)/usr/bin/ ; ln -s ftpsync ftpsync.pl
 	chmod -R 0755 $(DESTDIR)
 	touch common-install-indep
 

@@ -17,7 +17,8 @@ echo "Building FTPSync.pl $FSVER"
 COLLECTDIR="target/ftpsync-$FSVER"
 mkdir -pv $COLLECTDIR
 cp -avu \
-  src/ftpsync.pl \
+  src/ftpsync \
+  src/ftpsync-ssl \
   doc/*.txt \
   debian/changelog \
   $COLLECTDIR/

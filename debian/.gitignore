@@ -1,0 +1,5 @@
+*.debhelper.log
+*.substvars
+devhost.txt.gz
+files
+ftpsync
