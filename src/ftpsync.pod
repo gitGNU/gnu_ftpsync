@@ -1,0 +1,380 @@
+#!/usr/bin/perl -w
+
+=head1 NAME
+
+ftpsync - synchronize a local dir with a dir on an FTP server.
+
+
+=head1 SYNOPSIS
+
+B<ftpsync> [ -cdfghinlpqstv ] localdir remoteURL
+
+B<ftpsync> [ -cdfghinlpqstv ] remoteURL localdir
+
+
+=head1 DESCRIPTION
+
+GNU FTPsync synchronizes a local dir to a remote URL.
+
+
+=head1 OPTIONS
+
+=over 9
+
+=item I<localdir>
+
+The local dir to synchronize.
+
+
+=item I<remoteURL>
+
+The URL of the FTP server. The URL can contain username password:
+ftp://username:password@ftpserver/dir
+
+
+=item B<-c>
+
+Prompt the user about whether to run each command line and read a line
+from the terminal.  Only run the command line if the response starts
+with 'y' or 'Y'.
+
+
+=item B<-d>
+
+Turns debug output (including verbose output) on.
+
+
+=item B<-f>
+
+Flat operation, no subdir recursion.
+
+
+=item B<-g>
+
+Forces sync direction to GET (remote to local).
+
+
+=item B<-h>
+
+Prints out help text.
+
+
+=item B<-i>
+
+Forces info mode, only telling what would be done.
+
+
+=item B<-n>
+
+No deletion of obsolete files or directories.
+
+
+=item B<-l>
+
+Follow local symbolic links as if they were directories.
+
+
+=item B<-p>
+
+Forces sync direction to PUT (local to remote).
+
+
+=item B<-q>
+
+Turns quiet operation on.
+
+
+=item B<-s>
+
+Turns timestamp comparison off (only checks for changes in size).
+
+
+=item B<-t>
+
+Turns timestamp setting for local files off.
+
+
+=item B<-v>
+
+Turns verbose output on.
+
+
+=item I<cfg=>
+
+Read parameters and options from file defined by value.
+
+
+=item I<ftpserver=>
+
+Defines the FTP server, defaults to "localhost".
+
+
+=item I<ftpdir=>
+
+Defines the FTP directory, defaults to "." (/wo '"').
+
+
+=item I<ftpuser=>
+
+Defines the FTP user, defaults to "ftp".
+
+
+=item I<ftppasswd=>
+
+Defines the FTP password, defaults to "anonymous".
+
+
+=item I<ignoremask=>
+
+Defines a regexp to ignore certain files, like .svn.
+
+
+=item I<slowmillis=>
+
+Sleeps speficed # of ms between PUTs, default 100, 0=off.
+
+
+=item I<timeoffset=>
+
+Overrules clocksync() detection with given offset in seconds.
+
+
+=back
+
+
+=head1 EXAMPLE: Copying a dir to an FTP server
+
+GNU FTPsync can synchronize a local dir to an FTP server,
+
+B<ftpsync mydir ftp://user:password@ftp.example.com/remote/dir>
+
+
+=head1 EXAMPLE: Copying an FTP server to a local dir
+
+GNU FTPsync can synchronize an FTP server to a local dir,
+
+B<ftpsync ftp://user:password@ftp.example.com/remote/dir mydir>
+
+
+=head1 ENVIRONMENT VARIABLES
+
+=over 9
+
+=item $FTPSYNC
+
+The environment variable $FTPSYNC is used for ???
+
+=item $TMPDIR
+
+Directory for temporary files used for time synchronization.
+
+
+=back
+
+
+=head1 CONFIG FILE
+
+The file ~/.ftpsync/config 
+
+=head1 EXIT STATUS
+
+=over 6
+
+=item 0
+
+Copying finished with no errors.
+
+=item 1
+
+Unknown options.
+
+=item 2
+
+Some copying failed.
+
+=item 255
+
+Other error.
+
+=back
+
+
+=head1 BUGS
+
+FTPsync cannot synchronize between two remote FTPURLs.
+
+
+=head1 REPORTING BUGS
+
+Report bugs to <bug-ftpsync@gnu.org> or
+https://savannah.gnu.org/bugs/?func=additem&group=ftpsync
+
+Your bug report should always include:
+
+=over 2
+
+=item *
+
+The error message you get (if any).
+
+=item *
+
+The output of B<ftpsync --version>. If you are not running the latest
+released version you should specify why you believe the problem is not
+fixed in that version.
+
+=item *
+
+A complete example that others can run that shows the problem.
+
+=item *
+
+The output of your example. If your problem is not easily reproduced
+by others, the output might help them figure out the problem.
+
+=back
+
+If you suspect the error is dependent on your environment or
+distribution, please see if you can reproduce the error on one of
+these VirtualBox images:
+http://sourceforge.net/projects/virtualboximage/files/
+
+Specifying the name of your distribution is not enough as you may have
+installed software that is not in the VirtualBox images.
+
+If you cannot reproduce the error on any of the VirtualBox images
+above, you should assume the debugging will be done through you. That
+will put more burden on you and it is extra important you give any
+information that help.
+
+
+=head1 AUTHOR
+
+Copyright (C) 2009,2010,2011,2012,2013 Christoph Lechleitner
+
+Copyright (C) 2013 Ole Tange, http://ole.tange.dk and Free Software
+Foundation, Inc.
+
+
+=head1 LICENSE
+
+Copyright (C) 2007,2008,2009,2010,2011,2012,2013 Free Software
+Foundation, Inc.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 3 of the License, or
+at your option any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=head2 Documentation license I
+
+Permission is granted to copy, distribute and/or modify this documentation
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
+Texts.  A copy of the license is included in the file fdl.txt.
+
+=head2 Documentation license II
+
+You are free:
+
+=over 9
+
+=item B<to Share>
+
+to copy, distribute and transmit the work
+
+=item B<to Remix>
+
+to adapt the work
+
+=back
+
+Under the following conditions:
+
+=over 9
+
+=item B<Attribution>
+
+You must attribute the work in the manner specified by the author or
+licensor (but not in any way that suggests that they endorse you or
+your use of the work).
+
+=item B<Share Alike>
+
+If you alter, transform, or build upon this work, you may distribute
+the resulting work only under the same, similar or a compatible
+license.
+
+=back
+
+With the understanding that:
+
+=over 9
+
+=item B<Waiver>
+
+Any of the above conditions can be waived if you get permission from
+the copyright holder.
+
+=item B<Public Domain>
+
+Where the work or any of its elements is in the public domain under
+applicable law, that status is in no way affected by the license.
+
+=item B<Other Rights>
+
+In no way are any of the following rights affected by the license:
+
+=over 2
+
+=item *
+
+Your fair dealing or fair use rights, or other applicable
+copyright exceptions and limitations;
+
+=item *
+
+The author's moral rights;
+
+=item *
+
+Rights other persons may have either in the work itself or in
+how the work is used, such as publicity or privacy rights.
+
+=back
+
+=back
+
+=over 9
+
+=item B<Notice>
+
+For any reuse or distribution, you must make clear to others the
+license terms of this work.
+
+=back
+
+A copy of the full license is included in the file as cc-by-sa.txt.
+
+
+=head1 DEPENDENCIES
+
+GNU FTPsync uses Perl, and the Perl modules Getopt::Long, File::Temp,
+File::Find, File::Listing, Net::FTP, Net::Cmd, Net::Netrc, and
+IO::Handle.
+
+
+=head1 SEE ALSO
+
+B<ftp>(1), B<rsync>(1).
+
+=cut
