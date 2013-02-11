@@ -515,9 +515,9 @@ sub dosync()
 	if (! exists $remotedirs{$curlocaldir}) { 
 	    logger("d","$curlocaldir\n");
 	    if ($doinfoonly) { next; }
+	    if ($ftpc->mkdir($curlocaldir) ne $curlocaldir) { die "Could not create remote subdirectory $curlocaldir\n"; }
+	    $ftpc->quot('SITE', sprintf('CHMOD %04o %s', (lstat $curlocaldir)[2] & 07777, $curlocaldir));
 	}
-        if ($ftpc->mkdir($curlocaldir) ne $curlocaldir) { die "Could not create remote subdirectory $curlocaldir\n"; }
-        $ftpc->quot('SITE', sprintf('CHMOD %04o %s', (lstat $curlocaldir)[2] & 07777, $curlocaldir));
       }
     }
     # copy files missing or too old at the target, synchronize timestamp _after_ copying

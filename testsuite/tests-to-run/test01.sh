@@ -2,6 +2,7 @@
 
 # $FTPSYNC must be the binary to test
 # $FTPURL must be an upload URL with no subdirs: ftp://ftp_20130204_9627:n93cDqnf2t@ftp.dna.ku.dk/
+# $FTPURL2 must be an upload URL with no subdirs: ftp://ftp_20130204_9627:n93cDqnf2t@ftp.dna.ku.dk/
 
 TMP=/tmp/ftpsync-$$
 mkdir -p $TMP
@@ -10,7 +11,9 @@ mkdir -p $TMP
 $FTPSYNC $TMP $FTPURL
 
 mkdir -p $TMP/{adir,bdir,cdir}
-parallel 'echo Content_of_{} > {}' ::: $TMP/{adir,bdir,cdir}/{afile,bfile,cfile}
+mkdir -p $TMP/{adir,bdir,cdir}/subdir
+parallel 'echo Content_of_{} > {}' ::: $TMP/{adir,bdir,cdir}{/subdir,}/{afile,bfile,cfile}
+
 
 # Symlinks
 ln -s /etc/hosts $TMP/symlink-absolute-outside-file-exists
@@ -23,8 +26,13 @@ ln -s adir/afile $TMP/symlink-relative-inside-file-exists
 ln -s no/such/file $TMP/symlink-relative-inside-no-such-file
 
 # Todo: Permissions
-chmod 000 $TMP/adir
-chmod 000 $TMP/bdir/bfile
+#chmod 000 $TMP/adir
+#chmod 000 $TMP/bdir/bfile
+
+$FTPSYNC $TMP $FTPURL
+
+# Subdirs with new files
+parallel 'echo Content_of_{} > {}' ::: $TMP/{adir,bdir,cdir}{/subdir,}/newfile
 
 $FTPSYNC $TMP $FTPURL
 
