@@ -37,6 +37,7 @@ use Net::FTP;
 use Net::Cmd;
 use Net::Netrc;
 use strict;
+use Getopt::Long;
 # flushing ...
 use IO::Handle;
 STDOUT->autoflush(1);
@@ -101,76 +102,135 @@ if ($configfile ne "") {
   } # else { print "Config file does not exist.\n"; } # For major problem debugging
 } # else { print "No config file to read.\n"; } # For major problem debugging
 
-# Parse Options/Parameters
-#print "Parsing all options.\n"; # For major problem debugging
-my $noofopts=0;
-for $curopt (@cfgfoptions, @cloptions) {
-  if ($curopt =~ /^-[a-zA-Z]/) {
-    my $i;
-    for ($i=1; $i<length($curopt); $i++) {
-      my $curoptchar=substr($curopt,$i,1);
-      $noofopts++;
-      if    ($curoptchar =~ /[cC]/)  { $docheckfirst=1; }
-      elsif ($curoptchar =~ /[dD]/)  { $dodebug=1; $doverbose=3; $doquiet=0; $opt::verbose = 3; }
-      elsif ($curoptchar =~ /[fF]/)  { $doflat=1; }
-      elsif ($curoptchar =~ /[gG]/)  { $syncdirection="get"; }
-      elsif ($curoptchar =~ /[hH?]/) { print_syntax(); exit 0; }
-      elsif ($curoptchar =~ /[iI]/)  { $doinfoonly=1; }
-      elsif ($curoptchar =~ /[lL]/)  { $followsymlinks=1; }
-      elsif ($curoptchar =~ /[pP]/)  { $syncdirection="put"; }
-      elsif ($curoptchar =~ /[qQ]/)  { $dodebug=0; $doverbose=0; $doquiet=1; $opt::verbose = 0; }
-      elsif ($curoptchar =~ /[sS]/)  { $notimestampcheck=1; }
-      elsif ($curoptchar =~ /[tT]/)  { $notimestamping=1; }
-      elsif ($curoptchar =~ /[vV]/)  { $doverbose++; $opt::verbose++; }
-      elsif ($curoptchar =~ /[nN]/)  { $nodelete=1; }
-      else  { error("Unknown option: \"-".$curoptchar."\"\n"); $returncode+=1; }
-    }
-  }
-  elsif ($curopt =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)(\/.*)?/) {
-    $noofopts++;
-    $remoteURL = $curopt;
-    parseRemoteURL();
-    if ( $syncdirection eq "" )
-    { $syncdirection="get"; }
-  }
-  elsif ($curopt =~ /^[a-z]+=.+/) {
-    $noofopts++;
-    my ($fname, $fvalue) = split /=/, $curopt, 2;
-    if    ($fname eq "cfg")       { next; }
-    elsif ($fname eq "ftpdir")    { $ftpdir     =$fvalue;
-                                    if ($ftpdir ne "/") { $ftpdir=~s/\/$//; }
-                                    if ( $syncdirection eq "" ) { $syncdirection="get"; }
-                                  }
-    elsif ($fname =~ m/ftppass(w(or)?d)?/i)
-                                  { $ftppasswd=$fvalue;
-                                    if ( $syncdirection eq "" ) { $syncdirection="get"; }
-                                  }
-    elsif ($fname eq "ftpserver") { $ftpserver  =$fvalue;
-                                    if ( $syncdirection eq "" ) { $syncdirection="get"; }
-                                  }
-    elsif ($fname eq "ftpuser")   { $ftpuser    =$fvalue;
-                                    if ( $syncdirection eq "" ) { $syncdirection="get"; }
-                                  }
-    elsif ($fname eq "localdir")  { $localdir   =$fvalue; $localdir=~s/\/$//;
-                                    if ( $syncdirection eq "" ) { $syncdirection="put"; }
-                                  }
-    elsif ($fname eq "timeout")   { if ($fvalue>0) { $ftptimeout =$fvalue; } }
-    elsif ($fname eq "ignoremask") { $ignoremask = $fvalue; }
-    elsif ($fname eq "timeoffset") { $syncoff = $fvalue; }
-    elsif ($fname eq "slowmillis") { $slowmillis = $fvalue; }
-  }
-  else {
-    if ($localdir eq "") {
-      $noofopts++;
-      $localdir = $curopt;
-      if ( $syncdirection eq "" )
-      { $syncdirection="put"; }
-    } else {
-      error("Unknown parameter: \"".$curopt."\"\n"); $returncode+=1
-    }
-  }
+sub options_hash {
+    # Returns a hash of the GetOptions config
+    return
+	("debug|d|D" => \$opt::debug,
+	 "verbose|v" => \@opt::verbose,
+	 "version|V" => \$opt::version,
+	 "dry-run|dryrun" => \$opt::dryrun,
+	 "help|h|H" => \$opt::help,
+	 "check|c|C" => \$opt::check,
+	 "flat|f|F" => \$opt::flat,
+	 "get|g|G" => \$opt::get,
+	 "put|p|P" => \$opt::put,
+	 "info|i|I" => \$opt::info,
+	 "links|l|L" => \$opt::links,
+	 "quiet|q|Q" => \$opt::quiet,
+	 "notimestampcheck|s|S" => \$opt::notimestampcheck,
+	 "notimestamping|t|T" => \$opt::notimestamping,
+	 "nodelete|n|N" => \$opt::nodelete,
+	 "cfg=s" => \$opt::cfg,
+	 "ftpserver=s" => \$opt::ftpserver,
+	 "ftpdir=s" => \$opt::ftpdir,
+	 "ftpuser=s" => \$opt::ftpuser,
+	 "ftppasswd|ftppass|ftppassword=s" => \$opt::ftppasswd,
+	 "localdir=s" => \$opt::localdir,
+	 "ignoremask=s" => \$opt::ignoremask,
+	 "slowmillis=i" => \$opt::slowmillis,
+	 "timeoffset=i" => \$opt::timeoffset,
+	 "timeout=i" => \$opt::timeout,
+	);
 }
-if ($noofopts == 0) { print_syntax(); exit 0; }
+
+sub get_options_from_array {
+    # Run GetOptions on @array
+    # Returns:
+    #   true if parsing worked
+    #   false if parsing failed
+    #   @array is changed
+    my $array_ref = shift;
+    # A bit of shuffling of @ARGV needed as GetOptionsFromArray is not
+    # supported everywhere
+    my @save_argv;
+    my $this_is_ARGV = (\@::ARGV == $array_ref);
+    if(not $this_is_ARGV) {
+	@save_argv = @::ARGV;
+	@::ARGV = @{$array_ref};
+    }
+    my @retval = GetOptions(options_hash());
+    if(not $this_is_ARGV) {
+	@{$array_ref} = @::ARGV;
+	@::ARGV = @save_argv;
+    }
+    return @retval;
+}
+
+sub parse_options {
+    Getopt::Long::Configure("bundling","require_order");
+    get_options_from_array(\@ARGV) || die_usage();
+    my @cfgoptions;
+    if(defined $opt::cfg) {
+	open(IN,"<",$opt::cfg) || die_usage();
+	@cfgoptions = <IN>;
+	close IN;
+	get_options_from_array(\@cfgoptions) || die_usage();
+    }
+
+    if($opt::check) { $docheckfirst=1; }
+    if($opt::debug) { $dodebug=1; $doverbose=3; $doquiet=0; $opt::verbose = 3; }
+    if($opt::flat) { $doflat=1; }
+    if($opt::get) { $syncdirection="get"; }
+    if($opt::help) { print_syntax(); exit 0; }
+    if($opt::info) { $doinfoonly=1; }
+    if($opt::links) { $followsymlinks=1; }
+    if($opt::put) { $syncdirection="put"; }
+    if($opt::quiet) { $dodebug=0; $doverbose=0; $doquiet=1; $opt::verbose = 0; }
+    if($opt::notimestampcheck) { $notimestampcheck=1; }
+    if($opt::notimestamping) { $notimestamping=1; }
+    if(@opt::verbose)  { $doverbose=@opt::verbose; $opt::verbose=@opt::verbose; }
+    if($opt::nodelete)  { $nodelete=1; }
+
+    for my $arg (@ARGV) {
+	if($arg =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)(\/.*)?/) {
+	    $remoteURL = $arg;	    
+	    parseRemoteURL();
+	    $syncdirection ||= "get";
+	}
+    }
+    if(defined $opt::ftpdir) { 
+	$ftpdir = $opt::ftpdir;
+	if($ftpdir ne "/") { $ftpdir=~s/\/$//; }
+	$syncdirection ||= "get";
+    }
+    if(defined $opt::ftppasswd) {
+	$ftppasswd = $opt::ftppasswd;
+	$syncdirection ||= "get";
+    }
+    if(defined $opt::ftpserver) {
+	$ftpserver = $opt::ftpserver;
+	$syncdirection ||= "get";
+    }
+    if(defined $opt::ftpuser) {
+	$ftpuser = $opt::ftpuser;
+	$syncdirection ||= "get";
+    }
+    if(defined $opt::localdir) {
+	$localdir = $opt::localdir;
+	$localdir=~s/\/$//;
+	$syncdirection ||= "put";
+    }
+    if($opt::timeout) {
+	$ftptimeout = $opt::timeout;
+    }
+    if(defined $opt::ignoremask) {
+	$ignoremask = $opt::ignoremask;
+    }
+    if(defined $opt::timeoffset) {
+	$syncoff = $opt::timeoffset;
+    }
+    if(defined $opt::slowmillis) {
+	$slowmillis = $opt::slowmillis;
+    }
+    if ($localdir eq "") {
+	$localdir = shift @ARGV;
+	$syncdirection ||= "put";
+    } else {
+	error("Unknown parameter: \"".@ARGV."\"\n"); $returncode+=1
+    }
+}
+
+parse_options();
 
 # .netrc support 
 if ( ($ftpserver ne "") and ($ftppasswd eq "anonymous") ) {
@@ -456,7 +516,6 @@ sub buildremotetree() {
     my $ftpcurdir=$ftpc->pwd();
     if ($ftpcurdir ne $curcwddir && $ftpcurdir ne "$curcwddir".'/') {
       die "Could not cwd to $curcwddir :" . $ftpc->message ; }
-    logger("","\n");
     buildremotetree();
     $ftpc->cdup();
     $curremotesubdir = $oldcurremotesubdir;
