@@ -32,6 +32,7 @@
 
 use File::Temp qw(tempfile tempdir);
 use File::Find;
+use File::Basename;
 use File::Listing;
 use Net::FTP;
 use Net::Cmd;
@@ -120,6 +121,7 @@ sub options_hash {
 	 "notimestampcheck|s|S" => \$opt::notimestampcheck,
 	 "notimestamping|t|T" => \$opt::notimestamping,
 	 "nodelete|n|N" => \$opt::nodelete,
+	 "delete" => \$opt::delete,
 	 "cfg=s" => \$opt::cfg,
 	 "ftpserver=s" => \$opt::ftpserver,
 	 "ftpdir=s" => \$opt::ftpdir,
@@ -150,12 +152,12 @@ sub get_options_from_array {
 	@save_argv = @::ARGV;
 	@::ARGV = @{$array_ref};
     }
-    my @retval = GetOptions(options_hash());
+    my $retval = GetOptions(options_hash());
     if(not $this_is_ARGV) {
 	@{$array_ref} = @::ARGV;
 	@::ARGV = @save_argv;
     }
-    return @retval;
+    return $retval;
 }
 
 sub parse_options {
@@ -168,7 +170,6 @@ sub parse_options {
 	close IN;
 	get_options_from_array(\@cfgoptions) || die_usage();
     }
-
     if($opt::check) { $docheckfirst=1; }
     if($opt::debug) { $dodebug=1; $doverbose=3; $doquiet=0; $opt::verbose = 3; }
     if($opt::flat) { $doflat=1; }
@@ -232,10 +233,45 @@ sub parse_options {
     }
 }
 
-parse_options();
-#print my_dump(buildtree(@ARGV));
-#die;
+sub die_usage {
+    print STDERR
+	qq(Usage:\n);
+    exit(1);
+}
 
+parse_options();
+sub gnu_main {
+    my @src_urls;
+    push(@src_urls,$localdir);
+    my $dst_url = shift @ARGV;
+    
+    my %src_tree = buildtree(@src_urls);
+    my %dst_tree = buildtree($dst_url);
+    my @files_to_add = sort(missing(\%src_tree,\%dst_tree));
+    my @files_to_delete = sort(missing(\%dst_tree,\%src_tree));
+    my @files_to_update = sort(changed(\%src_tree,\%dst_tree));
+    
+    logger("","Files to add: ".($#files_to_add+1)."\n",
+	   "Files to add: @files_to_add\n");
+    logger("","Files to delete: ".($#files_to_delete+1)."\n",
+	   "Files to delete: @files_to_delete\n");
+    logger("","Files to update: ".($#files_to_update+1)."\n",
+	   "Files to update: @files_to_update\n");
+    
+    if($opt::delete) {
+	# Delete before copy to avoid problems if a src dir is a file on dst
+	delete_files(\%dst_tree,$dst_url,@files_to_delete,@files_to_update);
+    }
+    
+    copy(\%src_tree,$dst_url,@files_to_add,@files_to_update);
+    
+    # if($opt::move) {
+    #   delete_src(@all_files);
+    # }
+
+    print("FINISHED\n");
+    exit(0);
+}
 
 # .netrc support 
 if ( ($ftpserver ne "") and ($ftppasswd eq "anonymous") ) {
@@ -268,8 +304,7 @@ if ($ftppasswd eq "") { error("No FTP password given.\n"); $returncode+=1; }
 if ($returncode > 0) { die "Aborting due to missing or wrong options! Call ftpsync -? for more information.\n";  }
 
 # Find out if ftp server is online & accessible
-my $ftpc;
-connection();
+my $ftpc = connection();
 
 logger("\nDetermine s offset.\n");
 if (($notimestamping+$notimestampcheck) lt 2 && $syncdirection eq "put" && $syncoff == 0) 
@@ -304,7 +339,7 @@ if (!$ftpc->pwd()) {
     #print "Message: (".$ftpc->code."/".$ftpc->status.") ".$ftpc->message; exit 0;
     if ($ftpc->code == 421 or $ftpc->status eq CMD_REJECT) {
         logger("\nReconnect to server.\n");
-        connection();
+        $ftpc = connection();
     }
 }
 buildremotetree();
@@ -343,15 +378,121 @@ $ftpc->quit();
 exit 0;
 
 
-
 #
 # Subs
 #
 
-sub connection() {
+sub copy {
+    my $src_tree_ref = shift;
+    my $dst_url = shift;
+    my @files = @_;
+    my %src = %$src_tree_ref;
+
+    logger("","Copying\n");
+    for my $file (sort @files) {
+	if(defined $src{$file}{'connection'}) {
+	    # Src file is remote
+	    if($Global::ftpconnections{$dst_url}) {
+		# Dst is remote
+		copy_remote_remote($src{$file}{'connection'},$file,$dst_url);
+	    } else {
+		# Dst is local
+		copy_remote_local($file,$dst_url);
+	    }
+	} else {
+	    # Src file is local
+	    if($Global::ftpconnections{$dst_url}) {
+		# Dst is remote
+		copy_local_remote($file,$dst_url,%src);
+	    } else {
+		# Dst is local
+		copy_local_local($file,$dst_url);
+	    }
+	}
+    }
+    logger("","\n");
+
+    sub copy_local_local {
+	die("Not implemented");
+    }
+    
+    sub copy_local_remote {
+	my $filepath = shift;
+	my $dst_url = shift;
+	my $path = (parse_url($dst_url))[5];
+	my %src = @_;
+	my $ftpc = $Global::ftpconnections{$dst_url};
+	my $file = $src{$filepath};
+	# Make subdirs if needed
+	ftpmkdirhier($ftpc,$path);
+	if($file->{'size'} == -1) {
+	    logger("",":","Make dir $dst_url/$filepath\n");
+	    ftpmkdir($ftpc,$path."/".$filepath);
+	} else {
+	    logger("",".","Copy $file->{'abspath'} to $dst_url/$filepath\n");
+	    ftpsleep();
+	    if(not $ftpc->put($file->{'abspath'},$path."/".$filepath)) {
+		die "Cannot write $filepath";
+	    }
+	}
+    }
+    
+    sub copy_remote_local {
+	my $file = shift;
+	my $dst_url = shift;
+
+	die("Not implemented");
+    }
+    
+    sub copy_remote_remote {
+	die("Not implemented");
+    }
+}
+
+
+sub delete_files {
+    my $tree_ref = shift;
+    my $url = shift;
+    my @files = @_;
+
+    logger("","Deleting from $url\n");
+    if($Global::ftpconnections{$url}) {
+	# Remote url
+	delete_remote($Global::ftpconnections{$url},$url,$tree_ref,@files);
+    } else {
+	delete_local();
+    }
+    logger("","\n");
+
+    sub delete_remote {
+	my $ftpc = shift;
+	my $url = shift;
+	my $tree_ref = shift;
+	my @files = @_;
+	my %tree = %$tree_ref;
+	for my $f (sort { length($b) <=> length($a) } @files) {
+	    # Sort by length to make sure files are deleted before dirs
+	    if($tree{$f}{'size'} == -1) {
+		# This is a dir
+		logger("",":","Rmdir: $url / $f = $tree{$f}{'abspath'}\n");
+		$ftpc->rmdir($tree{$f}{'abspath'});
+	    } else {
+		logger("",".","Delete: $url / $f = $tree{$f}{'abspath'}\n");
+		$ftpc->delete($tree{$f}{'abspath'});
+	    }
+	}
+    }
+
+    sub delete_local {
+	die("Not implemented");
+    }
+}
+
+
+sub connection {
   logger("","","\nFind out if ftp server is online & accessible.\n");
   my $doftpdebug=($doverbose > 2);
-  $ftpc = Net::FTP->new($ftpserver,Debug=>$doftpdebug,Timeout=>$ftptimeout,Passive=>1) || die "Could not connect to $ftpserver\n";
+  my $ftpc = Net::FTP->new($ftpserver,Debug=>$doftpdebug,Timeout=>$ftptimeout,Passive=>1) || die "Could not connect to $ftpserver\n";
   logger("","","Logging in as $ftpuser with password $ftppasswd.\n");
   $ftpc->login($ftpuser,$ftppasswd) || die "Could not login to $ftpserver as $ftpuser\n";
   my $ftpdefdir=$ftpc->pwd();
@@ -379,6 +520,147 @@ sub connection() {
   }
   if ($ftpc->pwd() ne $ftpdir) { die "Could not change to remote base directory $ftpdir\n"; }
   logger("","","Remote directory is now ".$ftpc->pwd()."\n");
+  return $ftpc;
+}
+
+
+sub ftpmkdirhier {
+    my $ftpc = shift;
+    my $dir = shift;
+    my @a = split "/", $dir;
+    my @dir;
+    while(@a) {
+	push @dir, shift @a;
+	ftpmkdir($ftpc,join("/",@dir));
+    }
+}
+
+
+sub ftpmkdir {
+    my $ftpc = shift;
+    my $dir = shift;
+    if($FTPMKDIR::already_done{$dir}++) {
+	# skip
+    } else {
+	ftpsleep();
+	if(not $ftpc->mkdir($dir)) {
+	    # Ignore
+	}
+	logger("","","","mkdir $dir\n");
+    }
+}
+
+
+sub ftpsleep {
+    # Sleep for 0.1 sec
+    usleep($opt::slowmillis || 100);
+}
+
+
+sub parse_url {
+    my $url = shift;
+    if($url=~m!(ftp|ftps|sftp):// # Scheme ($1)
+       (?:
+	([^:@/][^:@]*|) # Username ($2)
+	(?:
+	 :([^@]*) # Password ($3)
+	)?
+	@)?
+       ([^:/]*)? # Hostname ($4)
+       (?:
+	:
+	([^/]*)? # Port ($5)
+       )?
+       (?:
+	/
+	([^?]*)? # Dir ($6)
+       )?
+       !x) {
+	my ($scheme,$user,$pass,$host,$port,$dir) = ($1,$2,$3,$4,$5,$6);
+	return ($scheme,$user,$pass,$host,$port,$dir);
+    } else {
+	error("Cannot parse '$url'\n");
+    }
+}
+
+sub ftpconnect {
+    # Return ftp connection object
+    my $url = shift;
+    if(not defined $Global::ftpconnections{$url}) {
+	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
+	logger("","","\nFind out if ftp server is online & accessible.\n");
+	my $doftpdebug=($opt::verbose > 3);
+	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
+				 Timeout => ($opt::timeout || 120), Passive => 1)
+	    || die "Could not connect to $host\n";
+	logger("","","Logging in as $user with password $pass.\n");
+	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
+	my $ftpdefdir = $ftpc->pwd();
+	$ftpc->binary()
+	    or die "Cannot set binary mode ", $ftpc->message;
+	$Global::ftpconnections{$url} = $ftpc;
+    } 
+    return $Global::ftpconnections{$url};
+}
+
+sub changed {
+    # Determine if a file is changed:
+    #   * size mismatch
+    #   * dst_date < src_date
+    #
+    # Input:
+    #   $src_tree_ref: Reference to %src_tree
+    #   $dst_tree_ref: Reference to %dst_tree
+    #
+    # Output:
+    #   list of files changed in %dst_tree
+    #   files that are missing are ignored
+    my ($src_tree_ref,$dst_tree_ref) = @_;
+    my %src = %$src_tree_ref;
+    my %dst = %$dst_tree_ref;
+    my @common = grep { defined $dst{$_} } keys %src;
+    my @changed;
+    for my $file (@common) {
+	if($src{$file}{'size'} == $dst{$file}{'size'}
+	   and
+	   $src{$file}{'date'} <= $dst{$file}{'date'}) {
+	    next;
+	}
+	if($src{$file}{'size'} == -1 and $dst{$file}{'size'} == -1) {
+	    # This is a dir that both have - ignore date
+	    # TODO Can we sync mdate?
+	    next;
+	}
+	if($src{$file}{'size'} == -1 and $dst{$file}{'size'} != -1) {
+	    # A src file is a dir in dst
+	    error("$file is a dir on source but a file on destination.\n");
+	}
+	if($src{$file}{'size'} != -1 and $dst{$file}{'size'} == -1) {
+	    # A src dir is a file in dst
+	    error("$file is a file on source but a dir on destination.\n");
+	}
+	if($src{$file}{'size'} != $dst{$file}{'size'}
+	   or
+	   $src{$file}{'date'} >= $dst{$file}{'date'}) {
+	    push @changed, $file;
+	    next;
+	}
+	die_bug("changed: $file");
+    }
+    return @changed;
+}
+
+sub missing {
+    # Input:
+    #   $src_tree_ref: Reference to %src_tree
+    #   $dst_tree_ref: Reference to %dst_tree
+    # Output:
+    #   list of files missing in %dst_tree
+    my ($src_tree_ref,$dst_tree_ref) = @_;
+    my %src = %$src_tree_ref;
+    my %dst = %$dst_tree_ref;
+    my @missing = grep { not defined $dst{$_} } keys %src;
+    return @missing;
 }
 
 sub buildtree {
@@ -388,20 +670,24 @@ sub buildtree {
     #   %tree{filename}{'date'}=$modification_date;
     #   %tree{filename}{'size'}=$size;
     #   %tree{filename}{'link'}=$filename;
+    #   %tree{filename}{'parentdir'}=dirname($filename);
+    #   %tree{filename}{'abspath'}=path from url+$filename
     my @urls = @_;
     my %tree=();
     # For speed first put the full tree in an array before merging
     my @tree_arr = ();
     for my $url (@urls) {
 	if($url =~ m{ftps?://}) {
-	    logger("","","Building remote tree of $url\n");
+	    logger("","Building remote tree of $url\n");
 	    push(@tree_arr, remote_tree($url));
+	    logger("","\n");
 	} else {
 	    # Assume local if not starting with ftps?://
 	    # file:///foo => /foo
 	    $url =~ s{^file://}{}; 
-	    logger("","","Building local tree of $url\n");
+	    logger("","Building local tree of $url\n");
 	    push(@tree_arr, local_tree($url));
+	    logger("","\n");
 	}
     }
     %tree = @tree_arr;
@@ -409,18 +695,89 @@ sub buildtree {
 
     sub remote_tree {
 	my $url = shift;
-	die("Not implemented");
+	my $ftpc = ftpconnect($url);
+	my $path = (parse_url($url))[5];
+
+	# Single file not implemented => assume dir
+	#if(-d $path) {
+	    # Dir
+	    my %tree = remote_tree_dir($ftpc,"",$path);
+	    return %tree;
+	#} else {
+	    # Single file
+	#    return remote_tree_file($path);
+	#}
+
+	sub remote_tree_dir {
+	    my ($ftpc,$dir,$abs) = @_;
+	    logger("",":","Dir: ".$dir." in $abs\n");
+	    my %tree = ();
+	    my @tree_arr;
+
+	    ftpsleep();
+	    my @rfl = $ftpc->dir('-a',$path."/".$dir);
+#	    my %monthtonr;
+#	    @monthtonr{qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)} = 1..12;
+	    for my $curlsline (parse_dir(\@rfl)) {
+		my ($f,$type,$size,$date,$mode) = @$curlsline;
+		my $file = clean_dir_name($dir).$f;
+		my $abspath = clean_dir_name($abs).$file;
+		if($type eq "d") {
+		    if($file =~ /\/\.\.?$/ or $opt::flat) {
+			# Ignore . and .. and subdirs if --flat
+		    } else {
+			push(@tree_arr, remote_tree_dir($ftpc,$file,$abs));
+			# Mark directories by setting size to -1
+			$tree{$file}{'size'} = -1;
+		    }
+		} else {
+		    $tree{$file}{'size'} = $size;
+		}
+		$tree{$file}{'date'} = $date;
+		$tree{$file}{'abspath'} = $abspath;
+		$tree{$file}{'connection'} = $ftpc;
+		$tree{$file}{'parentdir'} = $dir;
+		logger("",".","File: ".$file."\t"."Modified ".$tree{$file}{'date'}."\tSize ".$tree{$file}{'size'}." bytes\n");
+	    }
+	    %tree = (@tree_arr,%tree);
+	    return %tree;
+	}
+
+	sub remote_tree_file {
+	    # Not used
+	}
     }
 
     sub local_tree {
-	my $url = shift;
-	if(-d $url) {
-	    # Dir
-	    return local_tree_dir($url);
-	} else {
-	    # Single file
-	    return local_tree_file($url);
+	my $path = shift;
+	# foo/bar/../ => foo/
+	while($path =~ s:[^/]+/\.\./::) {}
+	# foo/./ => foo/
+	while($path =~ s:/\./:/:g) {}
+	# foo// => foo/
+	while($path =~ s://+:/:) {}
+	my %tree;
+	my $prefix = $path;
+	if(not -e $path) {
+	    error("$path not found\n");
 	}
+	if(not -d $path) {
+	    # $path is a file. $prefix = dirname($prefix)
+	    $prefix = dirname($prefix);
+	}
+	# Dir
+	my %t2 = local_tree_dir($path);
+	# remove the prefix to get relative paths
+	while(my($k,$v) = each(%t2)) {
+	    if($k eq $prefix) {
+		# Skip the prefix dir
+		next;
+	    }
+	    $k =~ s:^$prefix/::;
+	    $tree{$k} = $v;
+	    $tree{$k}{'parentdir'} =~ s:^$prefix/::;
+	}
+	return %tree;
 
 	sub local_tree_dir {
 	    my $dir = shift;
@@ -448,9 +805,15 @@ sub buildtree {
 	    %tree = @tree_arr;
 	    return %tree;
 	}
+
 	sub local_tree_file {
 	    my $file = shift;
 	    my %tree;
+	    my $dir = $file;
+	    $dir =~ s:/?[^/]+$::;
+	    if($dir eq "") {
+		$dir = ".";
+	    }
 	    my @stat = lstat($file);
 	    if(-d $file) {
 		# Mark directories by setting size to -1
@@ -459,14 +822,31 @@ sub buildtree {
 		$tree{$file}{'size'} = $stat[7];
 	    }
 	    $tree{$file}{'date'} = $stat[9];
+	    $tree{$file}{'abspath'} = $file;
+	    $tree{$file}{'parentdir'} = $dir;
 	    logger("",".","File: ".$file."\t"."Modified ".$tree{$file}{'date'}."\tSize ".$tree{$file}{'size'}." bytes\n");
 	    return %tree;
 	}
     }
+    
+    sub clean_dir_name {
+	my $dir = shift;
+	# Returns:
+	#   dir/ or ""
+	# foo/bar/../ => foo/
+	while($dir =~ s:[^/]+/\.\.(/|$ )::x) {}
+	# ./foo => foo
+	# bar/./foo => bar/foo
+	while($dir =~ s:(^|[^/]+/)\./::) {}
+	if($dir eq "") {
+	    return $dir;
+	} else {
+	    return $dir."/";
+	}
+    }
 }
 
-
-
+###
 
 sub buildlocaltree() {
   if ($doflat) {
@@ -626,7 +1006,7 @@ sub clocksync {
     if(not $conn->put($name)) {
 	die "Cannot send timesync file $name";
     }
-    my ($basename) = $name=~m:([a-z_0-9]+)$:i;
+    my ($basename) = basename($name);
     logger("Sync file $name => $basename\n");
     my $now_here1 = time();
     my $now_there = $conn->mdtm($basename) or
@@ -962,6 +1342,8 @@ sub logger {
     $w[2] ||= $w[1];
     # Debug_string defaults to Verbose_string
     $w[3] ||= $w[2];
+    # FTP Debug_string defaults to Verbose_string
+    $w[4] ||= $w[3];
     print $w[$opt::verbose];
 }
 
@@ -977,6 +1359,13 @@ sub error {
     my @w = @_;
     my $prog = $Global::progname || "ftpsync";
     print STDERR $prog, ": Error: ", @w;
+    exit(1);
+}
+
+sub usleep {
+    # Sleep this many milliseconds.
+    my $secs = shift;
+    select(undef, undef, undef, $secs/1000);
 }
 
 sub my_dump {
@@ -1004,3 +1393,4 @@ sub my_dump {
         return (Data::Dump::dump(@dump_this));
     }
 }
+
