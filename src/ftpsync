@@ -80,8 +80,8 @@ my $slowmillis=100;
 my $curopt;
 my @cloptions=();
 for $curopt (@ARGV) {
-  if ($curopt =~ /^cfg=/) {
-    $configfile=$';
+  if ($curopt =~ /^cfg=(.*)/) {
+    $configfile=$1;
     if (! -r $configfile) { print "Config file does not exist: ".$configfile."\n"; $returncode+=1; }
   } else {
     push @cloptions, $curopt;
@@ -240,10 +240,13 @@ sub die_usage {
 }
 
 parse_options();
+gnu_main();
+exit(0);
+
 sub gnu_main {
     my @src_urls;
-    push(@src_urls,$localdir);
-    my $dst_url = shift @ARGV;
+    my $dst_url = pop @ARGV;
+    push(@src_urls,$localdir,@ARGV);
     
     my %src_tree = buildtree(@src_urls);
     my %dst_tree = buildtree($dst_url);
@@ -631,13 +634,15 @@ sub changed {
 	    # TODO Can we sync mdate?
 	    next;
 	}
-	if($src{$file}{'size'} == -1 and $dst{$file}{'size'} != -1) {
-	    # A src file is a dir in dst
-	    error("$file is a dir on source but a file on destination.\n");
-	}
-	if($src{$file}{'size'} != -1 and $dst{$file}{'size'} == -1) {
-	    # A src dir is a file in dst
-	    error("$file is a file on source but a dir on destination.\n");
+	if(not $opt::delete) {
+	    if($src{$file}{'size'} == -1 and $dst{$file}{'size'} != -1) {
+		# A src file is a dir in dst
+		error("$file is a dir on source but a file on destination.\n");
+	    }
+	    if($src{$file}{'size'} != -1 and $dst{$file}{'size'} == -1) {
+		# A src dir is a file in dst
+		error("$file is a file on source but a dir on destination.\n");
+	    }
 	}
 	if($src{$file}{'size'} != $dst{$file}{'size'}
 	   or
