@@ -39,6 +39,8 @@ use Net::Cmd;
 use Net::Netrc;
 use strict;
 use Getopt::Long;
+use URI::Escape;
+
 # flushing ...
 use IO::Handle;
 STDOUT->autoflush(1);
@@ -245,8 +247,8 @@ exit(0);
 
 sub gnu_main {
     my @src_urls;
-    my $dst_url = pop @ARGV;
-    push(@src_urls,$localdir,@ARGV);
+    my $dst_url = fill_in_ftpurl(pop @ARGV);
+    push(@src_urls,fill_in_ftpurl($localdir,@ARGV));
     
     my %src_tree = buildtree(@src_urls);
     my %dst_tree = buildtree($dst_url);
@@ -429,13 +431,14 @@ sub copy {
 	# Make subdirs if needed
 	ftpmkdirhier($ftpc,$path);
 	if($file->{'size'} == -1) {
-	    logger("",":","Make dir $dst_url/$filepath\n");
+	    logger("",":","Make dir $filepath\n","Make dir $dst_url/$filepath\n");
 	    ftpmkdir($ftpc,$path."/".$filepath);
 	} else {
-	    logger("",".","Copy $file->{'abspath'} to $dst_url/$filepath\n");
+	    my $cpath = clean_dir_name($path);
+	    logger("",".","Copy $file->{'abspath'} to $cpath$filepath\n","Copy $file->{'abspath'} to $dst_url/$filepath\n");
 	    ftpsleep();
-	    if(not $ftpc->put($file->{'abspath'},$path."/".$filepath)) {
-		die "Cannot write $filepath";
+	    if(not $ftpc->put($file->{'abspath'},$cpath.$filepath)) {
+		die "Cannot write $cpath$filepath";
 	    }
 	}
     }
@@ -458,7 +461,7 @@ sub delete_files {
     my $url = shift;
     my @files = @_;
 
-    logger("","Deleting from $url\n");
+    logger("","Deleting\n","Deleting\n","Deleting from $url\n");
     if($Global::ftpconnections{$url}) {
 	# Remote url
 	delete_remote($Global::ftpconnections{$url},$url,$tree_ref,@files);
@@ -477,10 +480,10 @@ sub delete_files {
 	    # Sort by length to make sure files are deleted before dirs
 	    if($tree{$f}{'size'} == -1) {
 		# This is a dir
-		logger("",":","Rmdir: $url / $f = $tree{$f}{'abspath'}\n");
+		logger("",":","Rmdir:  $tree{$f}{'abspath'}\n","Rmdir:  $url / $f = $tree{$f}{'abspath'}\n");
 		$ftpc->rmdir($tree{$f}{'abspath'});
 	    } else {
-		logger("",".","Delete: $url / $f = $tree{$f}{'abspath'}\n");
+		logger("",".","Delete: $tree{$f}{'abspath'}\n","Delete: $url / $f = $tree{$f}{'abspath'}\n");
 		$ftpc->delete($tree{$f}{'abspath'});
 	    }
 	}
@@ -493,10 +496,9 @@ sub delete_files {
 
 
 sub connection {
-  logger("","","\nFind out if ftp server is online & accessible.\n");
   my $doftpdebug=($doverbose > 2);
   my $ftpc = Net::FTP->new($ftpserver,Debug=>$doftpdebug,Timeout=>$ftptimeout,Passive=>1) || die "Could not connect to $ftpserver\n";
-  logger("","","Logging in as $ftpuser with password $ftppasswd.\n");
+  logger("","","Logging in as $ftpuser.\n","Logging in as $ftpuser with password $ftppasswd.\n");
   $ftpc->login($ftpuser,$ftppasswd) || die "Could not login to $ftpserver as $ftpuser\n";
   my $ftpdefdir=$ftpc->pwd();
   logger("","","Remote directory is now ".$ftpdefdir."\n");
@@ -559,10 +561,61 @@ sub ftpsleep {
     usleep($opt::slowmillis || 100);
 }
 
+sub fill_in_ftpurl {
+    # Fill in ftpurl with missing information
+    # ftp://?:?@ => Ask for user, pass
+    # If .netrc exists, use that for missing fields
+    my @urls = @_;
+    for my $url (@urls) {
+	my ($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
+	if($scheme =~ /^ftps?$/i) {
+	    if($user eq "?") {
+		print "User: ";
+		$user=<STDIN>;
+		chomp($user);
+	    }
+	    if($pass eq "?") {
+		print "Password: ";
+		$pass=<STDIN>;
+		chomp($pass);
+	    }
+	    if($host eq "?") {
+		print "Host: ";
+		$host=<STDIN>;
+		chomp($host);
+	    }
+	    if($port eq "?") {
+		print "Port: ";
+		$port=<STDIN>;
+		chomp($port);
+	    }
+	    if($dir eq "?") {
+		print "Dir: ";
+		$dir=<STDIN>;
+		chomp($dir);
+	    }
+	    # TODO read from netrc
+	    if(not defined $user) {
+	    }
+	    if(not defined $pass) {
+	    }
+	    if(not defined $host) {
+	    }
+	    if(not defined $port) {
+	    }
+	    if(not defined $dir) {
+	    }
+	    
+	    $url = $scheme . "://" . uri_escape($user) . ":" . uri_escape($pass) . '@' .
+		$host . ($port ? ":" . $port : "") . "/" . uri_escape($dir);
+	}
+    }
+    return(wantarray() ? @urls : pop @urls);
+}
 
 sub parse_url {
     my $url = shift;
-    if($url=~m!(ftp|ftps|sftp):// # Scheme ($1)
+    if($url =~ m!(ftp|ftps|sftp):// # Scheme ($1)
        (?:
 	([^:@/][^:@]*|) # Username ($2)
 	(?:
@@ -576,13 +629,19 @@ sub parse_url {
        )?
        (?:
 	/
-	([^?]*)? # Dir ($6)
+	(.*)? # Dir ($6)
        )?
-       !x) {
-	my ($scheme,$user,$pass,$host,$port,$dir) = ($1,$2,$3,$4,$5,$6);
+       $
+       !ix) {
+	my ($scheme,$user,$pass,$host,$port,$dir) = uri_unescape($1,$2,$3,$4,$5,$6);
 	return ($scheme,$user,$pass,$host,$port,$dir);
     } else {
-	error("Cannot parse '$url'\n");
+	if($url =~ m{://}) {
+	    error("$url is not an URL\n");
+	} else {
+	    # Not ftpurl - return as single string
+	    return $url;
+	}
     }
 }
 
@@ -591,12 +650,11 @@ sub ftpconnect {
     my $url = shift;
     if(not defined $Global::ftpconnections{$url}) {
 	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
-	logger("","","\nFind out if ftp server is online & accessible.\n");
 	my $doftpdebug=($opt::verbose > 3);
 	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
 				 Timeout => ($opt::timeout || 120), Passive => 1)
 	    || die "Could not connect to $host\n";
-	logger("","","Logging in as $user with password $pass.\n");
+	logger("","","Logging in as $user.\n","Logging in as $user with password $pass.\n");
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
 	my $ftpdefdir = $ftpc->pwd();
 	$ftpc->binary()
@@ -682,8 +740,10 @@ sub buildtree {
     # For speed first put the full tree in an array before merging
     my @tree_arr = ();
     for my $url (@urls) {
-	if($url =~ m{ftps?://}) {
-	    logger("","Building remote tree of $url\n");
+	my ($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
+	if($scheme =~ m{^s?ftps?$}i) {
+	    my $url_no_pass = $scheme."://".$user.'@'.$host."/".$dir;
+	    logger("","Building remote tree $url_no_pass\n","Building remote tree $url_no_pass\n","Building remote tree of $url\n");
 	    push(@tree_arr, remote_tree($url));
 	    logger("","\n");
 	} else {
@@ -742,7 +802,7 @@ sub buildtree {
 		$tree{$file}{'abspath'} = $abspath;
 		$tree{$file}{'connection'} = $ftpc;
 		$tree{$file}{'parentdir'} = $dir;
-		logger("",".","File: ".$file."\t"."Modified ".$tree{$file}{'date'}."\tSize ".$tree{$file}{'size'}." bytes\n");
+		logger("",".","mtime:".$tree{$file}{'date'}." Size:".$tree{$file}{'size'}."\t".$file."\n");
 	    }
 	    %tree = (@tree_arr,%tree);
 	    return %tree;
