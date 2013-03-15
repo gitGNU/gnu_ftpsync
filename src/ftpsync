@@ -705,6 +705,8 @@ sub changed {
 	if($src{$file}{'size'} != $dst{$file}{'size'}
 	   or
 	   $src{$file}{'date'} >= $dst{$file}{'date'}) {
+	    logger("","","Changed ".$src{$file}{'size'}."!=".$dst{$file}{'size'}.
+		   " or ".$src{$file}{'date'}.">=".$dst{$file}{'date'}." $file\n");
 	    push @changed, $file;
 	    next;
 	}
@@ -802,7 +804,7 @@ sub buildtree {
 		$tree{$file}{'abspath'} = $abspath;
 		$tree{$file}{'connection'} = $ftpc;
 		$tree{$file}{'parentdir'} = $dir;
-		logger("",".","mtime:".$tree{$file}{'date'}." Size:".$tree{$file}{'size'}."\t".$file."\n");
+		logger("",".","Mod:".$tree{$file}{'date'}." Size:".$tree{$file}{'size'}."\t".$file."\n");
 	    }
 	    %tree = (@tree_arr,%tree);
 	    return %tree;
@@ -889,7 +891,7 @@ sub buildtree {
 	    $tree{$file}{'date'} = $stat[9];
 	    $tree{$file}{'abspath'} = $file;
 	    $tree{$file}{'parentdir'} = $dir;
-	    logger("",".","File: ".$file."\t"."Modified ".$tree{$file}{'date'}."\tSize ".$tree{$file}{'size'}." bytes\n");
+	    logger("",".","Mod:".$tree{$file}{'date'}." Size:".$tree{$file}{'size'}."\t".$file."\n");
 	    return %tree;
 	}
     }

@@ -31,6 +31,8 @@ The local dir to synchronize.
 The URL of the FTP server. The URL can contain username password:
 ftp://username:password@ftpserver/dir
 
+If ? is given as username, password, ftpserver, or dir, the user will
+be asked for these.
 
 =item B<-c>
 
