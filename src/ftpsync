@@ -40,6 +40,7 @@ use Net::Netrc;
 use strict;
 use Getopt::Long;
 use URI::Escape;
+use File::Path qw(make_path);
 
 # flushing ...
 use IO::Handle;
@@ -120,6 +121,7 @@ sub options_hash {
 	 "info|i|I" => \$opt::info,
 	 "links|l|L" => \$opt::links,
 	 "quiet|q|Q" => \$opt::quiet,
+	 "move|remove-source-files" => \$opt::move,
 	 "notimestampcheck|s|S" => \$opt::notimestampcheck,
 	 "notimestamping|t|T" => \$opt::notimestamping,
 	 "nodelete|n|N" => \$opt::nodelete,
@@ -255,6 +257,7 @@ sub gnu_main {
     my @files_to_add = sort(missing(\%src_tree,\%dst_tree));
     my @files_to_delete = sort(missing(\%dst_tree,\%src_tree));
     my @files_to_update = sort(changed(\%src_tree,\%dst_tree));
+    my @src_files_to_delete = $opt::move ? sort(keys %src_tree) : ();
     
     logger("","Files to add: ".($#files_to_add+1)."\n",
 	   "Files to add: @files_to_add\n");
@@ -262,18 +265,21 @@ sub gnu_main {
 	   "Files to delete: @files_to_delete\n");
     logger("","Files to update: ".($#files_to_update+1)."\n",
 	   "Files to update: @files_to_update\n");
+    logger("","Source files to delete: ".($#src_files_to_delete+1)."\n",
+	   "Source files to delete: @src_files_to_delete\n");
     
     if($opt::delete) {
 	# Delete before copy to avoid problems if a src dir is a file on dst
 	delete_files(\%dst_tree,$dst_url,@files_to_delete,@files_to_update);
     }
-    
-    copy(\%src_tree,$dst_url,@files_to_add,@files_to_update);
-    
-    # if($opt::move) {
-    #   delete_src(@all_files);
-    # }
 
+    copy(\%src_tree,$dst_url,@files_to_add,@files_to_update);
+
+    if($opt::move) {
+	for my $src_url (@src_urls) {
+	    delete_files(\%src_tree,$src_url,@src_files_to_delete);
+	}
+    }
     print("FINISHED\n");
     exit(0);
 }
@@ -402,7 +408,7 @@ sub copy {
 		copy_remote_remote($src{$file}{'connection'},$file,$dst_url);
 	    } else {
 		# Dst is local
-		copy_remote_local($file,$dst_url);
+		copy_remote_local($src{$file}{'connection'},$file,$dst_url);
 	    }
 	} else {
 	    # Src file is local
@@ -425,29 +431,54 @@ sub copy {
 	my $filepath = shift;
 	my $dst_url = shift;
 	my $path = (parse_url($dst_url))[5];
+	if($path =~ m:^//:) {
+	    # ftp://user@host//path => /path
+	    $path =~ s:^//:/:;
+	} elsif($path =~ m:^/:) {
+	    # ftp://user@host/path => ./path
+	    $path =~ s:^:.:;
+	}
 	my %src = @_;
 	my $ftpc = $Global::ftpconnections{$dst_url};
 	my $file = $src{$filepath};
 	# Make subdirs if needed
-	ftpmkdirhier($ftpc,$path);
+	$opt::dryrun or ftpmkdirhier($ftpc,$path);
+	my $would = $opt::dryrun ? "Would " : "";
 	if($file->{'size'} == -1) {
-	    logger("",":","Make dir $filepath\n","Make dir $dst_url/$filepath\n");
-	    ftpmkdir($ftpc,$path."/".$filepath);
+	    logger("",":",$would."Make dir $filepath\n",$would."Make dir $dst_url$filepath\n");
+	    $opt::dryrun or ftpmkdir($ftpc,$path."/".$filepath);
 	} else {
 	    my $cpath = clean_dir_name($path);
-	    logger("",".","Copy $file->{'abspath'} to $cpath$filepath\n","Copy $file->{'abspath'} to $dst_url/$filepath\n");
-	    ftpsleep();
-	    if(not $ftpc->put($file->{'abspath'},$cpath.$filepath)) {
-		die "Cannot write $cpath$filepath";
+	    logger("",".",$would."Copy $file->{'abspath'} to $cpath$filepath\n",
+		   $would."Copy $file->{'abspath'} to $dst_url/$filepath\n");
+	    if(not $opt::dryrun) {
+		ftpsleep();
+		if(not $ftpc->put($file->{'abspath'},$cpath.$filepath)) {
+		    die "Cannot write $cpath$filepath";
+		}
 	    }
 	}
     }
-    
-    sub copy_remote_local {
-	my $file = shift;
-	my $dst_url = shift;
 
-	die("Not implemented");
+    sub copy_remote_local {
+	my $ftpc = shift;
+	my $filepath = shift;
+	my $path = shift;
+#	my $ftpc = $Global::ftpconnections{$src_url};
+	my $file = $src{$filepath};
+	# Make subdirs if needed
+	make_path($path);
+	if($file->{'size'} == -1) {
+	    logger("",":","Make dir $filepath\n","Make dir $path/$filepath\n");
+	    make_path($path."/".$filepath);
+	} else {
+	    my $cpath = clean_dir_name($path);
+	    logger("",".","Copy $file->{'abspath'} to $cpath$filepath\n","Copy $file->{'abspath'} to $path/$filepath\n");
+	    ftpsleep();
+	    if(not $ftpc->get($file->{'abspath'},$cpath.$filepath)) {
+		die "Cannot write $cpath$filepath";
+	    }
+	}
     }
     
     sub copy_remote_remote {
@@ -466,7 +497,7 @@ sub delete_files {
 	# Remote url
 	delete_remote($Global::ftpconnections{$url},$url,$tree_ref,@files);
     } else {
-	delete_local();
+	delete_local($tree_ref,@files);
     }
     logger("","\n");
 
@@ -478,19 +509,38 @@ sub delete_files {
 	my %tree = %$tree_ref;
 	for my $f (sort { length($b) <=> length($a) } @files) {
 	    # Sort by length to make sure files are deleted before dirs
+	    my $would = $opt::dryrun ? "Would " : "";
 	    if($tree{$f}{'size'} == -1) {
 		# This is a dir
-		logger("",":","Rmdir:  $tree{$f}{'abspath'}\n","Rmdir:  $url / $f = $tree{$f}{'abspath'}\n");
-		$ftpc->rmdir($tree{$f}{'abspath'});
+		logger("",":",$would."Rmdir:  $tree{$f}{'abspath'}\n",
+		       $would."Rmdir:  $url / $f = $tree{$f}{'abspath'}\n");
+		$opt::dryrun or $ftpc->rmdir($tree{$f}{'abspath'});
 	    } else {
-		logger("",".","Delete: $tree{$f}{'abspath'}\n","Delete: $url / $f = $tree{$f}{'abspath'}\n");
-		$ftpc->delete($tree{$f}{'abspath'});
+		logger("",".",$would."Delete: $tree{$f}{'abspath'}\n",
+		       $would."Delete: $url / $f = $tree{$f}{'abspath'}\n");
+		$opt::dryrun or $ftpc->delete($tree{$f}{'abspath'});
 	    }
 	}
     }
 
     sub delete_local {
-	die("Not implemented");
+	my $tree_ref = shift;
+	my %tree = %$tree_ref;	
+	my @files = @_;
+	for my $f (sort { length($b) <=> length($a) } @files) {
+	    # Sort by length to make sure files are deleted before dirs
+	    my $would = $opt::dryrun ? "Would " : "";
+	    if($tree{$f}{'size'} == -1) {
+		# This is a dir
+		logger("",":",$would."Rmdir:  $tree{$f}{'abspath'}\n",
+		       $would."Rmdir:  $url / $f = $tree{$f}{'abspath'}\n");
+		$opt::dryrun or rmdir($tree{$f}{'abspath'});
+	    } else {
+		logger("",".",$would."Delete: $tree{$f}{'abspath'}\n",
+		       $would."Delete: $url / $f = $tree{$f}{'abspath'}\n");
+		$opt::dryrun or unlink($tree{$f}{'abspath'});
+	    }
+	}
     }
 }
 
@@ -765,6 +815,13 @@ sub buildtree {
 	my $ftpc = ftpconnect($url);
 	my $path = (parse_url($url))[5];
 
+	if($path =~ m:^//:) {
+	    # ftp://user@host//path => /path
+	    $path =~ s:^//:/:;
+	} elsif($path =~ m:^/:) {
+	    # ftp://user@host/path => ./path
+	    $path =~ s:^:.:;
+	}
 	# Single file not implemented => assume dir
 	#if(-d $path) {
 	    # Dir
@@ -782,7 +839,13 @@ sub buildtree {
 	    my @tree_arr;
 
 	    ftpsleep();
-	    my @rfl = $ftpc->dir('-a',$path."/".$dir);
+	    my $ftpdir;
+	    if($dir eq "") {
+		$ftpdir = $path;
+	    } else {
+		$ftpdir = $path."/".$dir;
+	    }
+	    my @rfl = eval { $ftpc->dir('-a',$ftpdir) };
 #	    my %monthtonr;
 #	    @monthtonr{qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)} = 1..12;
 	    for my $curlsline (parse_dir(\@rfl)) {
@@ -826,7 +889,8 @@ sub buildtree {
 	my %tree;
 	my $prefix = $path;
 	if(not -e $path) {
-	    error("$path not found\n");
+	    # Path does not exist => return empty
+	    return %tree
 	}
 	if(not -d $path) {
 	    # $path is a file. $prefix = dirname($prefix)
@@ -905,7 +969,7 @@ sub buildtree {
 	# ./foo => foo
 	# bar/./foo => bar/foo
 	while($dir =~ s:(^|[^/]+/)\./::) {}
-	if($dir eq "") {
+	if($dir eq "" or $dir eq ".") {
 	    return $dir;
 	} else {
 	    return $dir."/";
