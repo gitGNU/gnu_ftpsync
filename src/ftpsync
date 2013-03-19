@@ -133,6 +133,7 @@ sub options_hash {
 	 "ftppasswd|ftppass|ftppassword=s" => \$opt::ftppasswd,
 	 "localdir=s" => \$opt::localdir,
 	 "ignoremask=s" => \$opt::ignoremask,
+	 "size-only|size|sizeonly" => \$opt::sizeonly,
 	 "slowmillis=i" => \$opt::slowmillis,
 	 "timeoffset=i" => \$opt::timeoffset,
 	 "timeout=i" => \$opt::timeout,
@@ -445,8 +446,9 @@ sub copy {
 	$opt::dryrun or ftpmkdirhier($ftpc,$path);
 	my $would = $opt::dryrun ? "Would " : "";
 	if($file->{'size'} == -1) {
+	    my $cpath = clean_dir_name($path);
 	    logger("",":",$would."Make dir $filepath\n",$would."Make dir $dst_url$filepath\n");
-	    $opt::dryrun or ftpmkdir($ftpc,$path."/".$filepath);
+	    $opt::dryrun or ftpmkdir($ftpc,$cpath.$filepath);
 	} else {
 	    my $cpath = clean_dir_name($path);
 	    logger("",".",$would."Copy $file->{'abspath'} to $cpath$filepath\n",
@@ -454,7 +456,7 @@ sub copy {
 	    if(not $opt::dryrun) {
 		ftpsleep();
 		if(not $ftpc->put($file->{'abspath'},$cpath.$filepath)) {
-		    die "Cannot write $cpath$filepath";
+		    warning("Cannot write $cpath$filepath\n");
 		}
 	    }
 	}
@@ -734,7 +736,13 @@ sub changed {
     for my $file (@common) {
 	if($src{$file}{'size'} == $dst{$file}{'size'}
 	   and
-	   $src{$file}{'date'} <= $dst{$file}{'date'}) {
+	   ($opt::sizeonly or
+	    $src{$file}{'date'} <= $dst{$file}{'date'})) {
+	    # This is a file with:
+	    #   size = size
+	    #   --size-only or date <= date
+	    # =>
+	    # Not changed
 	    next;
 	}
 	if($src{$file}{'size'} == -1 and $dst{$file}{'size'} == -1) {
@@ -743,6 +751,8 @@ sub changed {
 	    next;
 	}
 	if(not $opt::delete) {
+	    # If we are not allowed to delete the mismatching filetypes
+	    # we should fail on changed filetype
 	    if($src{$file}{'size'} == -1 and $dst{$file}{'size'} != -1) {
 		# A src file is a dir in dst
 		error("$file is a dir on source but a file on destination.\n");
@@ -841,9 +851,11 @@ sub buildtree {
 	    ftpsleep();
 	    my $ftpdir;
 	    if($dir eq "") {
-		$ftpdir = $path;
+		$ftpdir = $abs;
+	    } elsif($abs eq "") {
+		$ftpdir = $dir;
 	    } else {
-		$ftpdir = $path."/".$dir;
+		$ftpdir = $abs."/".$dir;
 	    }
 	    my @rfl = eval { $ftpc->dir('-a',$ftpdir) };
 #	    my %monthtonr;
