@@ -704,7 +704,7 @@ sub ftpconnect {
 	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
 	my $doftpdebug=($opt::verbose > 3);
 	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
-				 Timeout => ($opt::timeout || 120), Passive => 1)
+				 Timeout => ($opt::timeout || 120), Passive => 0)
 	    || die "Could not connect to $host\n";
 	logger("","","Logging in as $user.\n","Logging in as $user with password $pass.\n");
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
@@ -857,7 +857,7 @@ sub buildtree {
 	    } else {
 		$ftpdir = $abs."/".$dir;
 	    }
-	    my @rfl = eval { $ftpc->dir('-a',$ftpdir) };
+	    my @rfl = eval { $ftpc->dir($ftpdir) };
 #	    my %monthtonr;
 #	    @monthtonr{qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)} = 1..12;
 	    for my $curlsline (parse_dir(\@rfl)) {
@@ -892,24 +892,23 @@ sub buildtree {
 
     sub local_tree {
 	my $path = shift;
-	# foo/bar/../ => foo/
-	while($path =~ s:[^/]+/\.\./::) {}
-	# foo/./ => foo/
-	while($path =~ s:/\./:/:g) {}
-	# foo// => foo/
-	while($path =~ s://+:/:) {}
 	my %tree;
 	my $prefix = $path;
 	if(not -e $path) {
 	    # Path does not exist => return empty
 	    return %tree
 	}
-	if(not -d $path) {
+	my %t2;
+	if(-d $path) {
+	    # Dir
+	    $path = clean_dir_name($path);
+	    $path =~ s{/$}{};
+	    %t2 = local_tree_dir($path);
+	} else {
 	    # $path is a file. $prefix = dirname($prefix)
 	    $prefix = dirname($prefix);
+	    %t2 = local_tree_file($path)
 	}
-	# Dir
-	my %t2 = local_tree_dir($path);
 	# remove the prefix to get relative paths
 	while(my($k,$v) = each(%t2)) {
 	    if($k eq $prefix) {
@@ -977,13 +976,16 @@ sub buildtree {
 	my $dir = shift;
 	# Returns:
 	#   dir/ or ""
+
 	# foo/bar/../ => foo/
 	while($dir =~ s:[^/]+/\.\.(/|$ )::x) {}
 	# ./foo => foo
 	# bar/./foo => bar/foo
 	while($dir =~ s:(^|[^/]+/)\./::) {}
+	# // => /
+	while($dir =~ s://:/:) {}
 	if($dir eq "" or $dir eq ".") {
-	    return $dir;
+	    return "";
 	} else {
 	    return $dir."/";
 	}
