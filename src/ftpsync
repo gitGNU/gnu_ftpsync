@@ -917,13 +917,14 @@ sub buildtree {
 	    # For speed first put the full tree in an array before merging
 	    my @tree_arr = ();
 	    push(@tree_arr, local_tree_file($dir));
-	    my @globbed=glob($dir."/{*,.*}");
-	    for my $file (@globbed) {
+	    opendir(my $dh,$dir) || die;
+	    my @files_in_dir = map { $dir."/".$_ } readdir($dh);
+	    for my $file (@files_in_dir) {
 		if($opt::exclude) {
 		    $file =~ /$opt::exclude/o and next;
 		}
 		if(-d $file) {
-		    if($file =~ /\/\.\.?$/ or $opt::flat) {
+		    if($file =~ /(^|\/)\.\.?$/ or $opt::flat) {
 			# Ignore . and .. and subdirs if --flat
 		    } else {
 			push(@tree_arr, local_tree_dir($file));
