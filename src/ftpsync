@@ -131,6 +131,7 @@ sub options_hash {
 	 "ftpdir=s" => \$opt::ftpdir,
 	 "ftpuser=s" => \$opt::ftpuser,
 	 "ftppasswd|ftppass|ftppassword=s" => \$opt::ftppasswd,
+	 "passiv|passive" => \$opt::passive,
 	 "localdir=s" => \$opt::localdir,
 	 "ignoremask=s" => \$opt::ignoremask,
 	 "size-only|size|sizeonly" => \$opt::sizeonly,
@@ -704,7 +705,8 @@ sub ftpconnect {
 	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
 	my $doftpdebug=($opt::verbose > 3);
 	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
-				 Timeout => ($opt::timeout || 120), Passive => 0)
+				 Timeout => ($opt::timeout || 120), 
+				 Passive => ($opt::passive || 0))
 	    || die "Could not connect to $host\n";
 	logger("","","Logging in as $user.\n","Logging in as $user with password $pass.\n");
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
