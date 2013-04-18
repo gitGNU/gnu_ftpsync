@@ -710,9 +710,18 @@ sub ftpconnect {
 	    || die "Could not connect to $host\n";
 	logger("","","Logging in as $user.\n","Logging in as $user with password $pass.\n");
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
-	my $ftpdefdir = $ftpc->pwd();
 	$ftpc->binary()
 	    or die "Cannot set binary mode ", $ftpc->message;
+	# Do a dir on a non-existing dir. That ought to tell us if we need passive.
+	$ftpc->dir("t2qhAY-3qDLG");
+	if(not $ftpc->pwd()) {
+	    # The connection broke: We need to go passive
+	    logger("","","Logging in as $user(passive).\n","Logging in as $user with password $pass(passive).\n");
+	    $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
+				  Timeout => ($opt::timeout || 120), 
+				  Passive => 1)
+		|| die "Could not connect to $host\n";
+	}
 	$Global::ftpconnections{$url} = $ftpc;
     } 
     return $Global::ftpconnections{$url};
