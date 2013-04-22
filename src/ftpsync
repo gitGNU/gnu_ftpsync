@@ -263,8 +263,10 @@ sub gnu_main {
     
     logger("","Files to add: ".($#files_to_add+1)."\n",
 	   "Files to add: @files_to_add\n");
-    logger("","Files to delete: ".($#files_to_delete+1)."\n",
-	   "Files to delete: @files_to_delete\n");
+    if($opt::delete) {
+	logger("","Files to delete: ".($#files_to_delete+1)."\n",
+	       "Files to delete: @files_to_delete\n");
+    }
     logger("","Files to update: ".($#files_to_update+1)."\n",
 	   "Files to update: @files_to_update\n");
     logger("","Source files to delete: ".($#src_files_to_delete+1)."\n",
@@ -456,6 +458,7 @@ sub copy {
 		   $would."Copy $file->{'abspath'} to $dst_url/$filepath\n");
 	    if(not $opt::dryrun) {
 		ftpsleep();
+		$ftpc->delete($cpath.$filepath);
 		if(not $ftpc->put($file->{'abspath'},$cpath.$filepath)) {
 		    warning("Cannot write $cpath$filepath\n");
 		}
@@ -549,7 +552,7 @@ sub delete_files {
 
 
 sub connection {
-  my $doftpdebug=($doverbose > 2);
+  my $doftpdebug=($doverbose > 4);
   my $ftpc = Net::FTP->new($ftpserver,Debug=>$doftpdebug,Timeout=>$ftptimeout,Passive=>1) || die "Could not connect to $ftpserver\n";
   logger("","","Logging in as $ftpuser.\n","Logging in as $ftpuser with password $ftppasswd.\n");
   $ftpc->login($ftpuser,$ftppasswd) || die "Could not login to $ftpserver as $ftpuser\n";
@@ -703,7 +706,7 @@ sub ftpconnect {
     my $url = shift;
     if(not defined $Global::ftpconnections{$url}) {
 	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
-	my $doftpdebug=($opt::verbose > 3);
+	my $doftpdebug=($opt::verbose > 4);
 	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
 				 Timeout => ($opt::timeout || 120), 
 				 Passive => ($opt::passive || 0))
@@ -712,19 +715,72 @@ sub ftpconnect {
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
 	$ftpc->binary()
 	    or die "Cannot set binary mode ", $ftpc->message;
-	# Do a dir on a non-existing dir. That ought to tell us if we need passive.
-	$ftpc->dir("t2qhAY-3qDLG");
-	if(not $ftpc->pwd()) {
-	    # The connection broke: We need to go passive
-	    logger("","","Logging in as $user(passive).\n","Logging in as $user with password $pass(passive).\n");
-	    $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
-				  Timeout => ($opt::timeout || 120), 
-				  Passive => 1)
-		|| die "Could not connect to $host\n";
-	}
 	$Global::ftpconnections{$url} = $ftpc;
+	$Global::timeoffset{$url} = timeoffset($url);
     } 
     return $Global::ftpconnections{$url};
+}
+
+sub timeoffset {
+    my $url = shift;
+    my $ftpc = ftpconnect($url);
+    my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
+    my ($outfh, $localfile) = ::tempfile();
+    my ($basename) = basename($localfile);
+    my $remote_file;
+    if(not -z $localfile) {
+	die "File $localfile for time sync must be empty.";
+    }
+    if(not $ftpc->put($localfile)) {
+	if(not $ftpc->put($localfile,"$dir/$basename")) {
+	    logger("Cannot send timesync file $localfile. Timestamping disabled.\n",
+		   "Cannot send timesync file $localfile. Timestamping disabled.\n",
+		   "Cannot send timesync file $localfile. Timestamping disabled.\n",
+		   "Cannot send timesync file $url/$basename. Timestamping disabled.\n");
+	    return undef;
+	} else {
+	    $remote_file = "$dir/$basename";
+	}
+    } else {
+	$remote_file = $basename;
+    }
+    logger("","","Sync file $localfile => $remote_file\n");
+    my $now_here1 = (lstat($localfile))[9];
+    unlink($localfile);
+    my $now_there;
+    my @rfl = eval { $ftpc->dir($remote_file) };
+    for my $curlsline (parse_dir(\@rfl)) {
+	my ($file,$type,$size,$date,$mode) = @$curlsline;
+	logger("","","","Mod:".$date." Size:".$size."\t".$file."\n");
+	$now_there = $date;
+    }
+    if(not $now_there) {
+	logger("Cannot get mod time of $remote_file. Timestamping disabled.\n",
+	       "Cannot get mod time of $remote_file. Timestamping disabled.\n",
+	       "Cannot get mod time of $remote_file. Timestamping disabled.\n",
+	       "Cannot get mod time of $url/$basename. Timestamping disabled.\n");
+	return undef;
+    }
+    my $now_here2 = time();
+    $ftpc->delete($remote_file);
+    logger("","","Localtime before $now_here1, Remote $now_there, after $now_here2\n");
+    
+    if ($now_here2 < $now_there) {
+	# remote is in the future
+	$syncoff = ($now_there - $now_here1);
+	$syncoff -= $syncoff % 60;
+	$syncoff = 0-$syncoff;
+    } else {
+	# remote is the past # or equal
+	$syncoff = ($now_here2 - $now_there);
+	$syncoff -= $syncoff % 60;
+    }
+    
+    my $hrs = int(abs($syncoff)/3600);
+    my $mins = int(abs($syncoff)/60) - $hrs*60;
+    my $secs = abs($syncoff) - $hrs*3600 - $mins*60;
+    logger("","",sprintf("Clock sync offset: %d:%02d:%02d\n", $hrs, $mins, $secs));
+    return $syncoff;
 }
 
 sub changed {
@@ -846,7 +902,7 @@ sub buildtree {
 	# Single file not implemented => assume dir
 	#if(-d $path) {
 	    # Dir
-	    my %tree = remote_tree_dir($ftpc,"",$path);
+	    my %tree = remote_tree_dir($ftpc,"",$path,$url);
 	    return %tree;
 	#} else {
 	    # Single file
@@ -854,7 +910,7 @@ sub buildtree {
 	#}
 
 	sub remote_tree_dir {
-	    my ($ftpc,$dir,$abs) = @_;
+	    my ($ftpc,$dir,$abs,$url) = @_;
 	    logger("",":","Dir: ".$dir." in $abs\n");
 	    my %tree = ();
 	    my @tree_arr;
@@ -879,14 +935,14 @@ sub buildtree {
 		    if($file =~ /\/\.\.?$/ or $opt::flat) {
 			# Ignore . and .. and subdirs if --flat
 		    } else {
-			push(@tree_arr, remote_tree_dir($ftpc,$file,$abs));
+			push(@tree_arr, remote_tree_dir($ftpc,$file,$abs,$url));
 			# Mark directories by setting size to -1
 			$tree{$file}{'size'} = -1;
 		    }
 		} else {
 		    $tree{$file}{'size'} = $size;
 		}
-		$tree{$file}{'date'} = $date;
+		$tree{$file}{'date'} = $date + $Global::timeoffset{$url};
 		$tree{$file}{'abspath'} = $abspath;
 		$tree{$file}{'connection'} = $ftpc;
 		$tree{$file}{'parentdir'} = $dir;
@@ -1394,6 +1450,7 @@ sub listremotedirs() {
 	logger("","",$curremotelink." -> ".$remotelinks{$curremotelink}."\n");
     }
 }
+
 sub parseRemoteURL() {
   if ($remoteURL =~ /^ftp:\/\/(([^@\/\\\:]+)(:([^@\/\\\:]+))?@)?([a-zA-Z01-9\.\-]+)(\/(.*))?/) {
     #print "DEBUG: parsing ".$remoteURL."\n";
@@ -1494,13 +1551,16 @@ sub logger {
     # $opt::verbose = 1  => info
     # $opt::verbose = 2  => verbose
     # $opt::verbose = 3  => debug
+    # $opt::verbose = 4  => debug with ftp communication
     my @w = ("",@_);
     # Verbose_string defaults to Info_string
     $w[2] ||= $w[1];
     # Debug_string defaults to Verbose_string
     $w[3] ||= $w[2];
-    # FTP Debug_string defaults to Verbose_string
+    # Debug_string defaults to Verbose_string
     $w[4] ||= $w[3];
+    # FTP Debug_string defaults to Debug_string
+    $w[5] ||= $w[4];
     print $w[$opt::verbose];
 }
 
