@@ -260,7 +260,7 @@ sub gnu_main {
     my @files_to_delete = sort(missing(\%dst_tree,\%src_tree));
     my @files_to_update = sort(changed(\%src_tree,\%dst_tree));
     my @src_files_to_delete = $opt::move ? sort(keys %src_tree) : ();
-    
+
     logger("","Files to add: ".($#files_to_add+1)."\n",
 	   "Files to add: @files_to_add\n");
     if($opt::delete) {
@@ -669,9 +669,15 @@ sub ftpconnect {
     if(not defined $Global::ftpconnections{$url}) {
 	my($scheme,$user,$pass,$host,$port,$dir) = parse_url($url);
 	my $doftpdebug=($opt::verbose > 4);
+	my $passive;
+	if(defined $opt::passive) {
+	    $passive = $opt::passive;
+	} else {
+	    $passive = autodetect_passive($user,$pass,$host,$doftpdebug);
+	}
 	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
 				 Timeout => ($opt::timeout || 120), 
-				 Passive => ($opt::passive || 0))
+				 Passive => $passive)
 	    || die "Could not connect to $host\n";
 	logger("","","Logging in as $user.\n","Logging in as $user with password $pass.\n");
 	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
@@ -681,6 +687,51 @@ sub ftpconnect {
 	$Global::timeoffset{$url} = timeoffset($url);
     } 
     return $Global::ftpconnections{$url};
+}
+
+sub autodetect_passive {
+    my ($user,$pass,$host,$doftpdebug) = @_;
+    my $passive_pid;
+    my $active_pid;
+    $SIG{CHLD} = 'IGNORE';
+    if(not $passive_pid = fork()) {
+	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
+				 Timeout => ($opt::timeout || 120), 
+				 Passive => 1)
+	    || die "Could not connect to $host\n";
+	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
+	$ftpc->dir(".");
+	exit(0);
+    }
+    if(not $active_pid = fork()) {
+	my $ftpc = Net::FTP->new($host, Debug => $doftpdebug,
+				 Timeout => ($opt::timeout || 120), 
+				 Passive => 0)
+	    || die "Could not connect to $host\n";
+	$ftpc->login($user,$pass) || die "Could not login to $host as $user\n";
+	$ftpc->dir(".");
+	sleep(1);
+	exit(0);
+    }
+    my $timeout = ($opt::timeout || 120)*10;
+    my $auto_passive;
+    logger("","","Detecting if passive needed");
+    while($timeout--) {
+	if(not kill 0 => $active_pid) {
+	    # $active_pid finished
+	    $auto_passive = 0;
+	    last;
+	}
+	if(not kill 0 => $passive_pid) {
+	    # $passive_pid finished
+	    $auto_passive = 1;
+	    last;
+	}
+	usleep(100);
+	logger("","",".");
+    }
+    logger("","",$auto_passive ? " Passive\n" : " Active\n");
+    return $auto_passive;
 }
 
 sub timeoffset {
@@ -741,7 +792,7 @@ sub timeoffset {
     my $hrs = int(abs($syncoff)/3600);
     my $mins = int(abs($syncoff)/60) - $hrs*60;
     my $secs = abs($syncoff) - $hrs*3600 - $mins*60;
-    logger("","",sprintf("Clock sync offset: %d:%02d:%02d\n", $hrs, $mins, $secs));
+    logger("","",sprintf("Clock sync offset: %dh%02dm%02ds\n", $hrs, $mins, $secs));
     return $syncoff;
 }
 
